@@ -1,0 +1,11 @@
+# 构建产物
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+
+# 本地 NuGet 相关
+*.nupkg

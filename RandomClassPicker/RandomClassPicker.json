@@ -1,0 +1,27 @@
+{
+  "Author": "pokn",
+  "Name": "Random Class Picker",
+  "Punchline": "点一下，用真随机换一个职业去玩。",
+  "Description": "从你已保存的套装里用真随机挑一个职业并直接切换过去。\n随机数来自 random.org 的大气噪声（ANU 量子真空涨落），而不是伪随机数。\n连不上 random.org 时会自动降级到本地随机并在界面上明确标注。",
+  "InternalName": "RandomClassPicker",
+  "AssemblyVersion": "0.0.0.1",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/你的用户名/RandomClassPicker",
+  "Tags": [
+    "职业",
+    "随机",
+    "套装",
+    "job",
+    "random"
+  ],
+  "CategoryTags": [
+    "utility"
+  ],
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "IconUrl": "",
+  "AcceptsFeedback": true
+}

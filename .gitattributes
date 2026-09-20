@@ -1,0 +1,9 @@
+# 统一使用 LF，避免在 Windows 上产生大量 CRLF 差异
+* text=auto eol=lf
+
+# 二进制文件不要做行尾转换
+*.png binary
+*.ico binary
+*.zip binary
+*.dll binary
+*.sln binary

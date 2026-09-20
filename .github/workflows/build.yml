@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Dalamud 的开发程序集不在 NuGet 上，需要单独下载一份到本地目录，
+      # 然后通过 DALAMUD_HOME 环境变量告诉 Dalamud.NET.Sdk 去哪里找。
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile dalamud.zip
+          Expand-Archive dalamud.zip -DestinationPath dalamud
+
+      - name: Build
+        env:
+          DALAMUD_HOME: ${{ github.workspace }}\dalamud
+        run: dotnet build RandomClassPicker/RandomClassPicker.csproj --configuration Release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RandomClassPicker
+          path: |
+            RandomClassPicker/bin/Release/*.dll
+            RandomClassPicker/bin/Release/*.json
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            RandomClassPicker/bin/Release/RandomClassPicker.dll
+            RandomClassPicker/bin/Release/RandomClassPicker.json

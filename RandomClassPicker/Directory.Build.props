@@ -1,0 +1,11 @@
+<Project>
+
+  <!--
+    国服 Dalamud 程序集目录。必须在项目文件之前生效，
+    所以只能放在 Directory.Build.props（Dalamud.NET.Sdk 在 Sdk.props 阶段就求值了）。
+  -->
+  <PropertyGroup>
+    <DALAMUD_HOME Condition="'$(DALAMUD_HOME)' == ''">$(APPDATA)\XIVLauncherCN\addon\Hooks\dev</DALAMUD_HOME>
+  </PropertyGroup>
+
+</Project>

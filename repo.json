@@ -1,0 +1,28 @@
+[
+  {
+    "Author": "pokn",
+    "Name": "Random Class Picker",
+    "InternalName": "RandomClassPicker",
+    "Punchline": "点一下，用真随机换一个职业或抽一个每日随机任务。",
+    "Description": "随机换职业：从已保存套装里用真随机（random.org 大气噪声）抽一个职业并直接切换，支持按职能随机、职业池勾选、抽中次数统计。随机每日任务：在任务搜索器上叠加面板，勾选后随机抽一个未完成的随机任务并直接排队。另有服务器信息栏快捷图标，左键一点即抽即切。",
+    "RepoUrl": "https://github.com/pokn0/Random-Class-Picker",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "Tags": [
+      "职业",
+      "随机",
+      "套装",
+      "每日随机任务",
+      "job",
+      "random",
+      "roulette"
+    ],
+    "CategoryTags": [
+      "utility"
+    ],
+    "IconUrl": "",
+    "DownloadLinkInstall": "https://github.com/pokn0/Random-Class-Picker/releases/latest/download/RandomClassPicker.zip",
+    "DownloadLinkUpdate": "https://github.com/pokn0/Random-Class-Picker/releases/latest/download/RandomClassPicker.zip",
+    "AssemblyVersion": "0.0.0.1"
+  }
+]
