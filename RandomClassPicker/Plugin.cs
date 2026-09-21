@@ -67,6 +67,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DtrBarHandler dtrBar;
     private readonly DutyRouletteCatalog dutyRoulettes;
     private readonly DutyRouletteOverlay dutyOverlay;
+    private readonly AddonScanner addonScanner;
+    private readonly OceanFishingOverlay oceanOverlay;
     private readonly CancellationTokenSource cancellation = new();
 
     /// <summary>最近一次抽中的职业名，供 DTR 图标显示。</summary>
@@ -110,6 +112,12 @@ public sealed class Plugin : IDalamudPlugin
         this.InitializeRouletteSelection();
         this.dutyOverlay = new DutyRouletteOverlay(this, GameGui, Log);
 
+        // 窗口发现工具（用于定位出海垂钓"申请航线"这类没有专用 addon 类型的窗口）
+        this.addonScanner = new AddonScanner(Log, GameGui);
+
+        // 出海垂钓"申请航线"菜单上的叠加面板
+        this.oceanOverlay = new OceanFishingOverlay(this, GameGui, Log);
+
         Log.Information($"{Name} 已加载。");
 
         // 加载时就把读到的套装写进日志，排查"某个职业没进池子"时不必再手动执行指令
@@ -128,6 +136,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= this.OnOpenConfigUi;
 
         this.windowSystem.RemoveAllWindows();
+        this.oceanOverlay.Dispose();
         this.dutyOverlay.Dispose();
         this.dtrBar.Dispose();
         this.window.Dispose();
@@ -149,6 +158,10 @@ public sealed class Plugin : IDalamudPlugin
     internal DutyRouletteCatalog DutyRoulettes => this.dutyRoulettes;
 
     internal DutyRouletteOverlay DutyOverlay => this.dutyOverlay;
+
+    internal AddonScanner AddonScanner => this.addonScanner;
+
+    internal OceanFishingOverlay OceanOverlay => this.oceanOverlay;
 
     internal void SaveConfig() => PluginInterface.SavePluginConfig(this.configuration);
 
@@ -796,7 +809,8 @@ public sealed class Plugin : IDalamudPlugin
                 this.window.IsOpen = true;
                 ChatGui.Print("[随机职业] /rcp 打开窗口 | /rcp roll 全职业随机 | " +
                     "/rcp tank|healer|melee|ranged|caster 按职能随机 | /rcp daily 打开任务搜索器（随机每日任务面板） | " +
-                    "/rcp list 列出套装 | /rcp roulette 列出随机任务 | /rcp status 查看筛选结果 | /rcp debug 打印职业职能映射");
+                    "/rcp list 列出套装 | /rcp roulette 列出随机任务 | /rcp scan 记录当前打开的窗口 | " +
+                    "/rcp status 查看筛选结果 | /rcp debug 打印职业职能映射");
                 break;
 
             case "status":
@@ -812,6 +826,11 @@ public sealed class Plugin : IDalamudPlugin
             case "roulette":
             case "rl":
                 this.PrintRouletteList();
+                break;
+
+            case "scan":
+                this.addonScanner.Start();
+                ChatGui.Print("[随机职业] 开始记录当前打开的窗口（3 秒）。请保持目标窗口可见。");
                 break;
 
             case "debug":
@@ -919,6 +938,26 @@ public sealed class Plugin : IDalamudPlugin
     {
         // 每帧让界面刷新一次套装快照等缓存
         this.window.Tick();
+
+        // 窗口扫描：结束后把结果写文件并提示
+        if (this.addonScanner.IsScanning)
+        {
+            this.addonScanner.Tick();
+
+            if (!this.addonScanner.IsScanning)
+            {
+                var result = this.addonScanner.WriteResult();
+                this.WriteDiagnostic("addon-scan.txt", result);
+                ChatGui.Print($"[随机职业] 窗口扫描完成，结果已写入: " +
+                    $"{Path.Combine(PluginInterface.ConfigDirectory.FullName, "addon-scan.txt")}");
+                foreach (var line in result.Split('\n').Where(l => l.Contains("size=")).Take(12))
+                    ChatGui.Print("  " + line.TrimEnd());
+            }
+        }
+        else
+        {
+            this.addonScanner.Tick();
+        }
     }
 
     /// <summary>

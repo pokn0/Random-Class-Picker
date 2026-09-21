@@ -44,6 +44,9 @@ public sealed class DutyRouletteOverlay : IDisposable
     {
         try
         {
+            // 扫描提示始终可见（与开关无关）
+            this.plugin.AddonScanner.DrawScanIndicator();
+
             var config = this.plugin.Configuration;
             if (!config.ShowDutyFinderOverlay)
                 return;

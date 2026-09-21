@@ -439,6 +439,33 @@ public sealed class MainWindow : Window, IDisposable
                 "开启时：面板可以拖到自己喜欢的位置，位置会记住。");
         }
 
+        ImGui.Separator();
+
+        // ---- 出海垂钓 ----
+        ImGui.TextUnformatted("出海垂钓（申请航线菜单）");
+
+        var showOcean = config.ShowOceanFishingOverlay;
+        if (ImGui.Checkbox("在申请航线菜单上显示面板", ref showOcean))
+        {
+            config.ShowOceanFishingOverlay = showOcean;
+            changed = true;
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "跟 NPC 对话打开「申请航线」菜单时，在菜单旁叠加一个自绘面板：\n" +
+                "近海/远海逐条勾选 + 一个「随机抽一条并申请」按钮。\n" +
+                "抽中后直接提交申请，等价于在菜单里点该航线。");
+        }
+
+        var oceanWidth = config.OceanFishingPanelWidth;
+        if (ImGui.SliderFloat("出海面板宽度", ref oceanWidth, 180f, 500f, "%.0f px"))
+        {
+            config.OceanFishingPanelWidth = oceanWidth;
+            changed = true;
+        }
+
         if (changed)
             this.plugin.SaveConfig();
 

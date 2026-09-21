@@ -138,6 +138,48 @@ dotnet build -c Debug
 - **可选手动摆放**：设置里打开「面板位置手动摆放」后面板带标题栏、可以拖，位置会记住
 - 完成状态改成行首的 `●`/`○` 标记（悬停显示文字），不再占用右侧空间
 
+## 2.7 出海垂钓随机航线（申请航线菜单）
+
+跟 NPC 对话打开**申请航线**菜单时，菜单旁会叠加一个自绘面板：
+
+- **近海 / 远海逐条勾选**（线路由游戏动态给出，默认全选，取消哪条记哪条）
+- 底部 **`🎲 随机抽一条并申请`** 按钮：从已勾选的航线里随机抽一条并**直接提交申请**
+- 抽中结果会写在面板上并回显到聊天栏
+
+### 为什么必须按菜单内容识别
+
+申请航线用的不是专用窗口，而是**通用的 `SelectString` 文本选择菜单**——限定职业任务等
+也用同一个窗口。所以不能只看窗口名，而是按菜单首行文本判定：
+
+```csharp
+var header = unit->GetTextNodeById(2);
+if (!header->NodeText.ToString().Contains("要乘坐哪条航线")) return;   // 不是申请航线
+```
+
+选项文本从 `AtkValue` 里取（`AtkValueType.String == 8`，成员类型是 `CStringPointer`，
+它自带 UTF-8 解码的 `ToString()`）：
+
+```csharp
+for (var i = 0; i < unit->AtkValuesCount; i++)
+{
+    var v = unit->AtkValues[i];
+    if (v.Type != AtkValueType.String || v.String.Value == null) continue;
+    // 按出现顺序编号 = 菜单索引
+}
+```
+
+提交选择：
+
+```csharp
+var values = stackalloc AtkValue[2];
+values[0].Type = AtkValueType.Int; values[0].Int = -1;   // -1 = 由索引选择
+values[1].Type = AtkValueType.Int; values[1].Int = menuIndex;
+unit->FireCallback(2u, values, true);
+```
+
+> **待实机确认**：`FireCallback` 的参数形式（2 个参数、第 2 个为 -1）是按 ATK 回调惯例写的，
+> 我无法在沙箱里实机验证。如果点了按钮没反应，把面板上的失败提示或日志发我。
+
 ## 3. 界面（五个标签页：抽签 / 设置 / 职业池 / 套装·历史 / 抽中统计）
 
 ### 抽签

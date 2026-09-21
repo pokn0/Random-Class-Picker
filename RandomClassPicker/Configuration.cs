@@ -148,6 +148,38 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>面板是否由用户手动摆放（可拖动、位置记住）；关闭则自动贴在任务搜索器左侧。</summary>
     public bool DutyFinderPanelManualPosition { get; set; }
 
+    // ------------------------------------------------------------------
+    // 出海垂钓（申请航线菜单）
+    // ------------------------------------------------------------------
+
+    /// <summary>在出海垂钓"申请航线"菜单上叠加面板。</summary>
+    public bool ShowOceanFishingOverlay { get; set; } = true;
+
+    /// <summary>出海垂钓面板宽度（像素）。</summary>
+    public float OceanFishingPanelWidth { get; set; } = 240f;
+
+    /// <summary>
+    /// 被取消勾选的航线菜单索引。
+    /// 用"排除列表"而不是"包含列表"，是为了让**默认全选**成立：
+    /// 菜单里的航线由游戏动态给出，默认全部参与随机，用户取消哪条就记哪条。
+    /// </summary>
+    public List<int> ExcludedOceanRouteIndices { get; set; } = [];
+
+    public bool IsOceanRouteSelected(int index)
+        => !this.ExcludedOceanRouteIndices.Contains(index);
+
+    public void SetOceanRouteSelected(int index, bool selected)
+    {
+        if (selected)
+        {
+            this.ExcludedOceanRouteIndices.Remove(index);
+        }
+        else if (!this.ExcludedOceanRouteIndices.Contains(index))
+        {
+            this.ExcludedOceanRouteIndices.Add(index);
+        }
+    }
+
     public bool IsRouletteSelected(byte id) => this.SelectedRouletteIds?.Contains(id) ?? false;
 
     public void SetRouletteSelected(byte id, bool selected)
