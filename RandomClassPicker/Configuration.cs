@@ -159,24 +159,30 @@ public sealed class Configuration : IPluginConfiguration
     public float OceanFishingPanelWidth { get; set; } = 240f;
 
     /// <summary>
-    /// 被取消勾选的航线菜单索引。
-    /// 用"排除列表"而不是"包含列表"，是为了让**默认全选**成立：
-    /// 菜单里的航线由游戏动态给出，默认全部参与随机，用户取消哪条就记哪条。
+    /// 自动确认"要乘坐 XX 航线吗？"的确认窗口。
+    /// 提交流程是两段：先选航线，游戏再弹确认框，需要点「是」才算真正提交。
     /// </summary>
-    public List<int> ExcludedOceanRouteIndices { get; set; } = [];
+    public bool AutoConfirmOceanRoute { get; set; } = true;
 
-    public bool IsOceanRouteSelected(int index)
-        => !this.ExcludedOceanRouteIndices.Contains(index);
+    /// <summary>
+    /// 被取消勾选的航线名。
+    /// 用"排除列表"而不是"包含列表"，是为了让**默认全选**成立；
+    /// 用名字而不是索引作为键，是因为不同时段可选的航线会变（近海/远海组合），索引不稳定。
+    /// </summary>
+    public List<string> ExcludedOceanRouteNames { get; set; } = [];
 
-    public void SetOceanRouteSelected(int index, bool selected)
+    public bool IsOceanRouteSelected(string routeName)
+        => !this.ExcludedOceanRouteNames.Contains(routeName);
+
+    public void SetOceanRouteSelected(string routeName, bool selected)
     {
         if (selected)
         {
-            this.ExcludedOceanRouteIndices.Remove(index);
+            this.ExcludedOceanRouteNames.Remove(routeName);
         }
-        else if (!this.ExcludedOceanRouteIndices.Contains(index))
+        else if (!this.ExcludedOceanRouteNames.Contains(routeName))
         {
-            this.ExcludedOceanRouteIndices.Add(index);
+            this.ExcludedOceanRouteNames.Add(routeName);
         }
     }
 

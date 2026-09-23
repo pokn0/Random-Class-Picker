@@ -466,6 +466,21 @@ public sealed class MainWindow : Window, IDisposable
             changed = true;
         }
 
+        var autoConfirm = config.AutoConfirmOceanRoute;
+        if (ImGui.Checkbox("自动点「是」确认航线申请", ref autoConfirm))
+        {
+            config.AutoConfirmOceanRoute = autoConfirm;
+            changed = true;
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "提交航线申请后，游戏会再弹一个「要乘坐 XX 航线吗？」确认窗口。\n" +
+                "开启后会自动点「是」，做到一键完成。\n" +
+                "只在刚提交过申请的一小段时间内生效，不会影响其它确认框。");
+        }
+
         if (changed)
             this.plugin.SaveConfig();
 

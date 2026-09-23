@@ -165,6 +165,11 @@ public sealed class Plugin : IDalamudPlugin
 
     internal void SaveConfig() => PluginInterface.SavePluginConfig(this.configuration);
 
+    /// <summary>把诊断信息写到插件自己的目录（不依赖 dalamud.log——那个文件满了就不再写入，
+    /// 导致排查时读到的是旧内容）。供叠加层等外部调用。</summary>
+    internal void WriteDiagnosticPublic(string fileName, string content)
+        => this.WriteDiagnostic(fileName, content);
+
     /// <summary>
     /// 把诊断信息写到插件自己的目录（不依赖 dalamud.log——那个文件满了就不再写入，
     /// 导致排查时读到的是旧内容）。
@@ -810,6 +815,7 @@ public sealed class Plugin : IDalamudPlugin
                 ChatGui.Print("[随机职业] /rcp 打开窗口 | /rcp roll 全职业随机 | " +
                     "/rcp tank|healer|melee|ranged|caster 按职能随机 | /rcp daily 打开任务搜索器（随机每日任务面板） | " +
                     "/rcp list 列出套装 | /rcp roulette 列出随机任务 | /rcp scan 记录当前打开的窗口 | " +
+                    "/rcp ikd 导出出海垂钓数据 | " +
                     "/rcp status 查看筛选结果 | /rcp debug 打印职业职能映射");
                 break;
 
@@ -831,6 +837,16 @@ public sealed class Plugin : IDalamudPlugin
             case "scan":
                 this.addonScanner.Start();
                 ChatGui.Print("[随机职业] 开始记录当前打开的窗口（3 秒）。请保持目标窗口可见。");
+                break;
+
+            case "ikd":
+                this.PrintOceanFishingData();
+                break;
+
+            case "ikdtest":
+                this.oceanOverlay.RunTriggerDiagnostic();
+                ChatGui.Print("[随机职业] 开始依次尝试各种触发方式（约 10 秒）。");
+                ChatGui.Print("[随机职业] 请保持申请航线菜单打开，期间**不要手动点击**。");
                 break;
 
             case "debug":
@@ -1113,6 +1129,82 @@ public sealed class Plugin : IDalamudPlugin
         this.configuration.SelectedRouletteIds = this.dutyRoulettes.Entries.Select(e => e.Id).ToList();
         SaveConfig();
         ChatGui.Print($"[随机职业] 随机任务勾选已重置为全部选中（{this.configuration.SelectedRouletteIds.Count} 个）。");
+    }
+
+    /// <summary>
+    /// 打印出海垂钓的航线数据：IKDRoute 表 + 内容查找器里与之对应的条目。
+    /// 目的是确认能否绕开 NPC 菜单、直接用内容查找器的排队接口申请航线。
+    /// </summary>
+    private void PrintOceanFishingData()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"===== 出海垂钓数据 {DateTime.Now:yyyy-MM-dd HH:mm:ss} =====");
+        sb.AppendLine();
+
+        try
+        {
+            // 1) IKDRoute 表：游戏内部的航线定义
+            sb.AppendLine("--- IKDRoute 表 ---");
+            var routeSheet = DataManager.GetExcelSheet<Lumina.Excel.Sheets.IKDRoute>();
+            if (routeSheet is null)
+            {
+                sb.AppendLine("IKDRoute 表不存在");
+            }
+            else
+            {
+                foreach (var row in routeSheet)
+                {
+                    var name = row.Name.ExtractText();
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    sb.AppendLine($"  RouteId={row.RowId,3}  「{name}」");
+                }
+            }
+
+            sb.AppendLine();
+
+            // 2) 内容查找器条件表里名字含"航线"的条目：这些才是能直接排队的对象
+            sb.AppendLine("--- ContentFinderCondition 里含「航线」的条目 ---");
+            var cfcSheet = DataManager.GetExcelSheet<Lumina.Excel.Sheets.ContentFinderCondition>();
+            if (cfcSheet is null)
+            {
+                sb.AppendLine("ContentFinderCondition 表不存在");
+            }
+            else
+            {
+                var hits = 0;
+                foreach (var row in cfcSheet)
+                {
+                    var name = row.Name.ExtractText();
+                    if (string.IsNullOrWhiteSpace(name))
+                        continue;
+
+                    if (!name.Contains("航线", StringComparison.Ordinal))
+                        continue;
+
+                    sb.AppendLine(
+                        $"  ConditionId={row.RowId,4} 「{name}」 ContentType={row.ContentType.RowId} " +
+                        $"Content={row.Content.RowId}");
+                    hits++;
+                }
+
+                if (hits == 0)
+                    sb.AppendLine("  （没有命中。说明航线不在这个表里，无法用内容查找器排队。）");
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"枚举失败: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        this.WriteDiagnostic("ocean-fishing-data.txt", sb.ToString());
+
+        foreach (var line in sb.ToString().Split('\n').Where(l => l.Contains("RouteId") || l.Contains("ConditionId")))
+            ChatGui.Print("  " + line.TrimEnd());
+
+        ChatGui.Print($"[随机职业] 出海垂钓数据已写入: " +
+            $"{Path.Combine(PluginInterface.ConfigDirectory.FullName, "ocean-fishing-data.txt")}");
     }
 
     /// <summary>供界面按钮调用。</summary>

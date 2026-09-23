@@ -28,14 +28,146 @@ public sealed class OceanFishingOverlay : IDisposable
     private string lastResult = string.Empty;
     private bool lastWasError;
 
+    /// <summary>
+    /// 刚提交过航线申请的时刻。用于限定"自动确认"只在紧随其后的确认框上生效，
+    /// 避免误点其它地方的确认框。
+    /// </summary>
+    private DateTime routeSubmittedAt = DateTime.MinValue;
+
+    private static readonly TimeSpan AutoConfirmWindow = TimeSpan.FromSeconds(15);
+
+    private readonly OceanFishingProbe probe;
+
     public OceanFishingOverlay(Plugin plugin, IGameGui gameGui, IPluginLog log)
     {
         this.plugin = plugin;
         this.gameGui = gameGui;
         this.log = log;
         this.menu = new OceanFishingMenu(gameGui, log);
+        this.probe = new OceanFishingProbe(gameGui, log);
 
         Plugin.PluginInterface.UiBuilder.Draw += this.OnDraw;
+    }
+
+    // ------------------------------------------------------------------
+    // 触发方式诊断
+    // ------------------------------------------------------------------
+
+    private List<OceanFishingMenu.TriggerMethod> diagnosticQueue = [];
+    private int diagnosticListIndex;
+    private DateTime diagnosticNextAt = DateTime.MinValue;
+    private DateTime diagnosticTriedAt = DateTime.MinValue;
+    private string diagnosticCurrentMethod = string.Empty;
+    private bool diagnosticAwaitingResult;
+
+    /// <summary>每种触发方式观察多久（毫秒）。太短会漏掉延迟弹出的确认框。</summary>
+    private const int DiagnosticObserveMs = 4000;
+
+    /// <summary>
+    /// 依次尝试各种"选中航线"的触发方式：每种只调一次，然后**耐心观察 4 秒**
+    /// 看确认框是否出现、以及菜单是否还开着。用于找出哪种方式能真正触发参加。
+    /// </summary>
+    internal void RunTriggerDiagnostic()
+    {
+        // 用游戏自己的 EntryNames 读菜单项，索引即游戏菜单索引
+        var options = this.menu.ReadOptionsFromEntries();
+        if (options.Count == 0)
+        {
+            Plugin.ChatGui.PrintError("[随机职业] 请先打开申请航线菜单（且保持可见），再执行该指令。");
+            return;
+        }
+
+        this.diagnosticListIndex = options[0].ListIndex;
+
+        this.diagnosticQueue =
+        [
+            OceanFishingMenu.TriggerMethod.ListSelectDispatch,
+            OceanFishingMenu.TriggerMethod.FireCallbackSingle,
+            OceanFishingMenu.TriggerMethod.FireCallbackIndexOne,
+            OceanFishingMenu.TriggerMethod.ListSelectOnly,
+            OceanFishingMenu.TriggerMethod.FireCallbackMinusOne,
+        ];
+
+        this.probe.Start();
+        this.probe.Trace($"菜单航线数={options.Count}，测试目标=\"{options[0].Name}\"（菜单索引 {options[0].ListIndex}）");
+        this.probe.Trace("观察窗口 4 秒/方式");
+        this.diagnosticNextAt = DateTime.UtcNow;
+        this.diagnosticAwaitingResult = false;
+    }
+
+    private void TickTriggerDiagnostic()
+    {
+        if (this.diagnosticQueue.Count == 0 && !this.diagnosticAwaitingResult)
+            return;
+
+        var now = DateTime.UtcNow;
+
+        // 结算上一次尝试的观察结果
+        if (this.diagnosticAwaitingResult)
+        {
+            if (now < this.diagnosticNextAt)
+            {
+                // 观察期间：一旦确认框出现就立刻记录并点掉
+                if (this.menu.IsConfirmOpen())
+                {
+                    this.probe.Trace($"  ★ {this.diagnosticCurrentMethod} 让确认框出现了！");
+                    this.probe.FoundWorkingMethod = this.diagnosticCurrentMethod;
+                    this.menu.ConfirmYesNo();
+                    this.probe.Trace("  → 已自动点「是」");
+                    this.diagnosticAwaitingResult = false;
+                    this.diagnosticQueue.Clear();
+                }
+
+                return;
+            }
+
+            // 观察超时：记录结论
+            var menuStillOpen = this.menu.IsOpen;
+            var confirmOpen = this.menu.IsConfirmOpen();
+            this.probe.Trace(
+                $"  → {this.diagnosticCurrentMethod} 观察结束: 确认框={(confirmOpen ? "出现" : "未出现")}, " +
+                $"菜单={(menuStillOpen ? "仍打开" : "已关闭")}");
+            this.diagnosticAwaitingResult = false;
+        }
+
+        if (this.diagnosticQueue.Count == 0)
+        {
+            this.FinishTriggerDiagnostic();
+            return;
+        }
+
+        if (now < this.diagnosticNextAt)
+            return;
+
+        // 开始下一次尝试
+        var method = this.diagnosticQueue[0];
+        this.diagnosticQueue.RemoveAt(0);
+        this.diagnosticCurrentMethod = method.ToString();
+
+        if (!this.menu.IsOpen)
+        {
+            this.probe.Trace($"  {method}: 菜单已关闭，停止测试");
+            this.diagnosticQueue.Clear();
+            this.FinishTriggerDiagnostic();
+            return;
+        }
+
+        this.menu.Trigger(this.diagnosticListIndex, method, this.probe);
+        this.diagnosticAwaitingResult = true;
+        this.diagnosticTriedAt = now;
+        this.diagnosticNextAt = now.AddMilliseconds(DiagnosticObserveMs);
+    }
+
+    private void FinishTriggerDiagnostic()
+    {
+        var verdict = this.probe.FoundWorkingMethod ?? "（无 —— 5 种方式都没能让确认框出现）";
+        var dump = this.probe.BuildDump("依次尝试 5 种触发方式，每种观察 4 秒") + $"\n\n结论: {verdict}";
+
+        this.plugin.WriteDiagnosticPublic("ocean-trigger-test.txt", dump);
+
+        Plugin.ChatGui.Print($"[随机职业] 触发方式测试完成。结论: {verdict}");
+        Plugin.ChatGui.Print($"[随机职业] 详细结果: " +
+            Path.Combine(Plugin.PluginInterface.ConfigDirectory.FullName, "ocean-trigger-test.txt"));
     }
 
     internal OceanFishingMenu Menu => this.menu;
@@ -45,11 +177,20 @@ public sealed class OceanFishingOverlay : IDisposable
         try
         {
             var config = this.plugin.Configuration;
+
+            // 自动确认紧随其后的"要乘坐 XX 航线吗？"确认框。
+            // 只在刚提交过申请的一小段时间内生效，且不影响其它确认框。
+            this.TryAutoConfirm();
+
+            // 触发方式诊断（/rcp ikdtest）
+            this.TickTriggerDiagnostic();
+
             if (!config.ShowOceanFishingOverlay)
                 return;
 
-            // 每帧重新读一次菜单内容：菜单项是动态的
-            this.options = this.menu.ReadOptions();
+            // 每帧重新读一次菜单内容：菜单项是动态的。
+            // 用 EntryNames（游戏自己的菜单项数组）而不是 AtkValues
+            this.options = this.menu.ReadOptionsFromEntries();
             if (this.options.Count == 0)
                 return;
 
@@ -78,21 +219,46 @@ public sealed class OceanFishingOverlay : IDisposable
     private void DrawPanel(Vector2 addonPos, Vector2 addonSize)
     {
         var config = this.plugin.Configuration;
-        var width = Math.Clamp(config.OceanFishingPanelWidth, 200f, 600f);
+
+        // 面板宽度不能超过申请航线窗口的宽度：不然"放到窗口上方"时会在水平方向压到窗口
+        var width = Math.Clamp(
+            Math.Min(config.OceanFishingPanelWidth, Math.Max(180f, addonSize.X)),
+            180f, 600f);
+
         var screen = ImGui.GetMainViewport().Size;
 
-        // 贴在申请航线窗口上方；放不下就贴左侧
-        var panelPos = new Vector2(addonPos.X + addonSize.X - width, addonPos.Y - 8f);
+        var estimatedHeight = 130f + (this.options.Count * 26f);
 
-        var estimatedHeight = 120f + (this.options.Count * 26f);
-        if (panelPos.Y + estimatedHeight > screen.Y || panelPos.Y < 4f)
-            panelPos = new Vector2(addonPos.X - width - 8f, addonPos.Y);
+        // 候选位置按优先级排列，挑第一个不与申请航线窗口重叠的。
+        // 注意：一定要用菜单的**实际**尺寸算重叠，估算高度会导致面板压在菜单上。
+        Span<Vector2> candidates =
+        [
+            new Vector2(addonPos.X + addonSize.X + 8f, addonPos.Y),  // 右侧
+            new Vector2(addonPos.X - width - 8f, addonPos.Y),        // 左侧
+            new Vector2(addonPos.X, addonPos.Y - estimatedHeight - 8f),  // 上方
+            new Vector2(addonPos.X, addonPos.Y + addonSize.Y + 8f),      // 下方
+        ];
+
+        var chosen = candidates[0];
+        foreach (var c in candidates)
+        {
+            if (this.Fits(c, width, estimatedHeight, screen) &&
+                !Overlaps(c, width, estimatedHeight, addonPos, addonSize))
+            {
+                chosen = c;
+                break;
+            }
+        }
+
+        // 四边都放不下时，退回"菜单正上方并贴屏幕边缘"，至少保证在屏内
+        if (Overlaps(chosen, width, estimatedHeight, addonPos, addonSize))
+            chosen = new Vector2(addonPos.X, Math.Max(4f, addonPos.Y - estimatedHeight - 8f));
 
         // 边界收敛，绝不跑出屏幕
-        panelPos.X = Math.Clamp(panelPos.X, 4f, Math.Max(4f, screen.X - width - 4f));
-        panelPos.Y = Math.Clamp(panelPos.Y, 4f, Math.Max(4f, screen.Y - estimatedHeight));
+        chosen.X = Math.Clamp(chosen.X, 4f, Math.Max(4f, screen.X - width - 4f));
+        chosen.Y = Math.Clamp(chosen.Y, 4f, Math.Max(4f, screen.Y - estimatedHeight - 4f));
 
-        ImGui.SetNextWindowPos(panelPos, ImGuiCond.Always);
+        ImGui.SetNextWindowPos(chosen, ImGuiCond.Always);
         ImGui.SetNextWindowSize(new Vector2(width, 0f), ImGuiCond.Always);
 
         const ImGuiWindowFlags flags = ImGuiWindowFlags.NoResize
@@ -113,6 +279,58 @@ public sealed class OceanFishingOverlay : IDisposable
         ImGui.PopStyleVar();
     }
 
+    /// <summary>
+    /// 若刚提交过航线申请、且游戏弹出了确认框，则自动点「是」。
+    /// 时效限制保证它不会去点别处的确认框。
+    /// </summary>
+    private void TryAutoConfirm()
+    {
+        if (this.routeSubmittedAt == DateTime.MinValue)
+            return;
+
+        if (DateTime.UtcNow - this.routeSubmittedAt > AutoConfirmWindow)
+        {
+            this.routeSubmittedAt = DateTime.MinValue;
+            return;
+        }
+
+        if (!this.plugin.Configuration.AutoConfirmOceanRoute)
+            return;
+
+        if (!this.menu.IsConfirmOpen())
+            return;
+
+        if (this.menu.ConfirmYesNo())
+        {
+            this.routeSubmittedAt = DateTime.MinValue;
+            this.lastResult += " → 已自动确认";
+            Plugin.ChatGui.Print("[随机职业] 已自动确认航线申请（点「是」）。");
+        }
+    }
+
+    /// <summary>面板是否完整落在屏幕内。</summary>
+    private bool Fits(Vector2 pos, float width, float height, Vector2 screen)
+        => pos.X >= 4f && pos.Y >= 4f
+           && pos.X + width <= screen.X - 4f
+           && pos.Y + height <= screen.Y - 4f;
+
+    /// <summary>面板是否与申请航线窗口重叠。</summary>
+    private static bool Overlaps(
+        Vector2 pos, float width, float height,
+        Vector2 addonPos, Vector2 addonSize)
+    {
+        const float margin = 4f;
+        var panelRight = pos.X + width;
+        var panelBottom = pos.Y + height;
+        var addonRight = addonPos.X + addonSize.X;
+        var addonBottom = addonPos.Y + addonSize.Y;
+
+        return pos.X < addonRight - margin
+               && panelRight > addonPos.X + margin
+               && pos.Y < addonBottom - margin
+               && panelBottom > addonPos.Y + margin;
+    }
+
     private void DrawContent()
     {
         var config = this.plugin.Configuration;
@@ -120,20 +338,20 @@ public sealed class OceanFishingOverlay : IDisposable
         ImGui.TextUnformatted("选择哪些航线参与随机：");
         ImGui.Separator();
 
-        // 勾选框按菜单里实际出现的航线生成
+        // 勾选框按菜单里实际出现的航线生成（用航线名作键：索引会随可选航线变化）
         foreach (var opt in this.options)
         {
-            var selected = config.IsOceanRouteSelected(opt.Index);
-            if (ImGui.Checkbox($"{opt.Name}##or{opt.Index}", ref selected))
+            var selected = config.IsOceanRouteSelected(opt.Name);
+            if (ImGui.Checkbox($"{opt.Name}##or{opt.ValueIndex}", ref selected))
             {
-                config.SetOceanRouteSelected(opt.Index, selected);
+                config.SetOceanRouteSelected(opt.Name, selected);
                 this.plugin.SaveConfig();
             }
         }
 
         ImGui.Separator();
 
-        var pool = this.options.Where(o => config.IsOceanRouteSelected(o.Index)).ToList();
+        var pool = this.options.Where(o => config.IsOceanRouteSelected(o.Name)).ToList();
         if (pool.Count == 0)
             ImGui.TextDisabled("请至少勾选一条航线。");
 
@@ -173,15 +391,20 @@ public sealed class OceanFishingOverlay : IDisposable
 
                 var poolNames = string.Join("，", pool.Select(o => o.Name));
 
-                // 提交必须在主线程
-                var submitted = Plugin.Framework.RunOnTick(() => this.menu.Select(picked.Index)).GetAwaiter().GetResult();
+                // 提交必须在主线程。用列表序号（不是 AtkValue 位置）
+                var submitted = Plugin.Framework.RunOnTick(() => this.menu.Select(picked.ListIndex)).GetAwaiter().GetResult();
 
                 if (submitted)
                 {
+                    // 游戏随后会弹"要乘坐 XX 航线吗？"确认框，交给 TryAutoConfirm 处理
+                    this.routeSubmittedAt = DateTime.UtcNow;
+
                     this.lastResult = $"已申请 {picked.Name}（{sourceTag}）";
                     this.lastWasError = false;
                     Plugin.ChatGui.Print(
                         $"[随机职业] 从{pool.Count}条航线（{poolNames}）中抽取到了{picked.Name}，已提交申请 —— {sourceTag}");
+                    if (this.plugin.Configuration.AutoConfirmOceanRoute)
+                        Plugin.ChatGui.Print("[随机职业] 等待确认窗口，将自动点「是」…");
                 }
                 else
                 {

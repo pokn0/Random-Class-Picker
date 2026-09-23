@@ -126,6 +126,70 @@ public sealed class AddonScanner
         sb.AppendLine();
         sb.Append(this.DumpSelectString());
 
+        // 确认窗口：手动点「参加」后会弹出，用来确定自动确认该传什么参数
+        sb.AppendLine();
+        sb.Append(this.DumpYesNo());
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// dump 确认窗口（SelectYesno）的实际内容。
+    /// 目的：确定"自动点「是」"应该给 FireCallback 传什么参数。
+    /// </summary>
+    private unsafe string DumpYesNo()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("--- 确认窗口（SelectYesno）---");
+
+        try
+        {
+            var addon = this.gameGui.GetAddonByName("SelectYesno", 1);
+            if (addon.IsNull)
+            {
+                sb.AppendLine("SelectYesno 当前未打开。");
+                return sb.ToString();
+            }
+
+            var unit = (AtkUnitBase*)addon.Address;
+            if (unit == null)
+            {
+                sb.AppendLine("SelectYesno 地址为空。");
+                return sb.ToString();
+            }
+
+            sb.AppendLine($"IsVisible={unit->IsVisible} AtkValuesCount={unit->AtkValuesCount}");
+
+            // 窗口文本：能确认它问的是哪条航线
+            sb.AppendLine("文本节点（NodeId 1..8）:");
+            for (uint nodeId = 1; nodeId <= 8; nodeId++)
+            {
+                var textNode = unit->GetTextNodeById(nodeId);
+                if (textNode == null)
+                    continue;
+
+                var text = textNode->NodeText.ToString();
+                if (string.IsNullOrWhiteSpace(text))
+                    continue;
+
+                sb.AppendLine($"  node {nodeId,2}: \"{text}\"");
+            }
+
+            // 回调参数：这是关键
+            sb.AppendLine("AtkValues 一览（type/int）:");
+            for (var i = 0; i < unit->AtkValuesCount && i < 24; i++)
+            {
+                var v = unit->AtkValues[i];
+                var n = v.Int;
+
+                sb.AppendLine($"  [{i,2}] type={(int)v.Type} ({v.Type}) int={n}");
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"dump 失败: {ex.GetType().Name}: {ex.Message}");
+        }
+
         return sb.ToString();
     }
 

@@ -156,29 +156,54 @@ var header = unit->GetTextNodeById(2);
 if (!header->NodeText.ToString().Contains("要乘坐哪条航线")) return;   // 不是申请航线
 ```
 
-选项文本从 `AtkValue` 里取（`AtkValueType.String == 8`，成员类型是 `CStringPointer`，
-它自带 UTF-8 解码的 `ToString()`）：
+### 菜单项的读取：用 `EntryNames`，不要用 `AtkValues`
 
-```csharp
-for (var i = 0; i < unit->AtkValuesCount; i++)
-{
-    var v = unit->AtkValues[i];
-    if (v.Type != AtkValueType.String || v.String.Value == null) continue;
-    // 按出现顺序编号 = 菜单索引
-}
+`PopupMenu.EntryNames` 是**游戏自己维护的菜单项数组**，索引就是游戏菜单索引：
+
+```
+EntryCount = 3
+[ 0] "乘坐罗斯利特湾航线。"
+[ 1] "乘坐无二江航线。"
+[ 2] "取消"
 ```
 
-提交选择：
+而 `AtkValues` 里的字符串项**不等于**菜单项——它混着表头：
 
-```csharp
-var values = stackalloc AtkValue[2];
-values[0].Type = AtkValueType.Int; values[0].Int = -1;   // -1 = 由索引选择
-values[1].Type = AtkValueType.Int; values[1].Int = menuIndex;
-unit->FireCallback(2u, values, true);
+```
+valueIdx[ 0] atkIndex 2: "要乘坐哪条航线？"   ← 表头，不是选项
+valueIdx[ 1] atkIndex 7: "乘坐罗斯利特湾航线。"
+valueIdx[ 2] atkIndex 8: "乘坐无二江航线。"
+valueIdx[ 3] atkIndex 9: "取消"
 ```
 
-> **待实机确认**：`FireCallback` 的参数形式（2 个参数、第 2 个为 -1）是按 ATK 回调惯例写的，
-> 我无法在沙箱里实机验证。如果点了按钮没反应，把面板上的失败提示或日志发我。
+第一版从 `AtkValues` 反推，得手工排除表头（还差点因为"表头也含『航线』"而漏过），
+而且索引语义对不上。改用 `EntryNames` 后直接用数组位置即可。
+
+### 提交选择的正确方式（试错记录）
+
+| 方式 | 结果 |
+| --- | --- |
+| `List->SelectItem(index, true/false)` | 菜单无任何变化，**无效** |
+| `FireCallback(2u, [{-1}, {index}], true)` | **无效** |
+| `FireCallback(1u, [{index}], true)` | **菜单被关闭，选择被受理** ✓ |
+
+**单个 Int 参数**才是对的——这和确认框 dump 里 `AtkValues[4] Int=1` 的形式一致，
+说明游戏这套回调习惯只传一个 Int。
+
+### 两段式提交：选航线 + 确认
+
+完整流程是两段，第二段常被忽略：
+
+```
+① SelectString 选航线（FireCallback 单 Int）
+   ↓
+② SelectYesno 弹「确定要乘坐 XX 航线吗？」
+   ↓
+③ 点「是」才算真正提交
+```
+
+所以插件在提交后会记一个**15 秒时效标记**，期间检测到 `SelectYesno` 就自动点「是」，
+既保证自动完成，又不会误点游戏里其它地方的确认框。`SelectYesno` 回调实测为 `(0, 1)`。
 
 ## 3. 界面（五个标签页：抽签 / 设置 / 职业池 / 套装·历史 / 抽中统计）
 
